@@ -53,13 +53,6 @@ public class RangeLayoutHelperFinder extends LayoutHelperFinder {
         }
     };
 
-    private Comparator<LayoutHelper> mLayoutHelperComparator = new Comparator<LayoutHelper>() {
-        @Override
-        public int compare(LayoutHelper lhs, LayoutHelper rhs) {
-            return lhs.getZIndex() - rhs.getZIndex();
-        }
-    };
-
     @Override
     public Iterator<LayoutHelper> iterator() {
         return Collections.unmodifiableList(mLayoutHelpers).iterator();
@@ -97,14 +90,11 @@ public class RangeLayoutHelperFinder extends LayoutHelperFinder {
         mLayoutHelperItems.clear();
         if (layouts != null) {
             for (LayoutHelper helper : layouts) {
-                Range<Integer> acceptRange = helper.getRange();
                 mLayoutHelpers.add(helper);
-                mLayoutHelperItems.add(new LayoutHelperItem(acceptRange, helper));
+                mLayoutHelperItems.add(new LayoutHelperItem(helper));
             }
 
             Collections.sort(mLayoutHelperItems, mLayoutHelperItemComparator);
-
-            Collections.sort(mLayoutHelpers, mLayoutHelperComparator);
         }
     }
 
@@ -116,13 +106,13 @@ public class RangeLayoutHelperFinder extends LayoutHelperFinder {
 
     @Nullable
     @Override
-    protected LayoutHelper getLayoutHelper(int position) {
-        final int helperCount = mLayoutHelperItems.size();
-        if (helperCount == 0) {
+    public LayoutHelper getLayoutHelper(int position) {
+        final int count = mLayoutHelperItems.size();
+        if (count == 0) {
             return null;
         }
 
-        int s = 0, e = helperCount - 1, m;
+        int s = 0, e = count - 1, m;
         LayoutHelperItem rs = null;
 
         // binary search range
@@ -145,20 +135,18 @@ public class RangeLayoutHelperFinder extends LayoutHelperFinder {
 
     static class LayoutHelperItem {
 
-        LayoutHelperItem(Range<Integer> range, LayoutHelper helper) {
-            this.range = range;
+        LayoutHelperItem(LayoutHelper helper) {
             this.layoutHelper = helper;
         }
 
-        Range<Integer> range;
         LayoutHelper layoutHelper;
 
         public int getStartPosition() {
-            return range.getLower();
+            return layoutHelper.getRange().getLower();
         }
 
         public int getEndPosition() {
-            return range.getUpper();
+            return layoutHelper.getRange().getUpper();
         }
 
     }

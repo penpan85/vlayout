@@ -24,18 +24,16 @@
 
 package com.alibaba.android.vlayout.layout;
 
+import com.alibaba.android.vlayout.LayoutManagerHelper;
+import com.alibaba.android.vlayout.OrientationHelperEx;
+import com.alibaba.android.vlayout.VirtualLayoutManager;
+
 import android.animation.Animator;
 import android.animation.AnimatorListenerAdapter;
-import android.support.v7.widget.OrientationHelper;
 import android.support.v7.widget.RecyclerView;
-import android.util.Log;
 import android.view.View;
-import android.view.ViewGroup;
 import android.view.ViewGroup.LayoutParams;
 import android.view.ViewPropertyAnimator;
-
-import com.alibaba.android.vlayout.LayoutManagerHelper;
-import com.alibaba.android.vlayout.VirtualLayoutManager;
 
 import static com.alibaba.android.vlayout.VirtualLayoutManager.VERTICAL;
 
@@ -254,7 +252,7 @@ public class FixLayoutHelper extends FixAreaLayoutHelper {
         }
 
         // Not in normal flow
-        if (shouldBeDraw(startPosition, endPosition, scrolled)) {
+        if (shouldBeDraw(helper, startPosition, endPosition, scrolled)) {
             mShouldDrawn = true;
             if (mFixView != null) {
                 // already capture in layoutViews phase
@@ -340,13 +338,14 @@ public class FixLayoutHelper extends FixAreaLayoutHelper {
     /**
      * Decide whether the view should be shown
      *
+     * @param helper layoutManagerHelper
      * @param startPosition the first visible position in RecyclerView
      * @param endPosition   the last visible position in RecyclerView
      * @param scrolled      how many pixels will be scrolled during this scrolling, 0 during
      *                      layouting
      * @return Whether the view in current layoutHelper should be shown
      */
-    protected boolean shouldBeDraw(int startPosition, int endPosition, int scrolled) {
+    protected boolean shouldBeDraw(LayoutManagerHelper helper, int startPosition, int endPosition, int scrolled) {
         return true;
     }
 
@@ -375,7 +374,7 @@ public class FixLayoutHelper extends FixAreaLayoutHelper {
         final VirtualLayoutManager.LayoutParams params = (VirtualLayoutManager.LayoutParams) view
                 .getLayoutParams();
 
-        final OrientationHelper orientationHelper = helper.getMainOrientationHelper();
+        final OrientationHelperEx orientationHelper = helper.getMainOrientationHelper();
         final boolean layoutInVertical = helper.getOrientation() == VERTICAL;
         if (layoutInVertical) {
             final int widthSpec = helper.getChildMeasureSpec(
@@ -407,7 +406,7 @@ public class FixLayoutHelper extends FixAreaLayoutHelper {
             }
 
             // do measurement
-            helper.measureChild(view, widthSpec, heightSpec);
+            helper.measureChildWithMargins(view, widthSpec, heightSpec);
         } else {
             final int heightSpec = helper.getChildMeasureSpec(
                     helper.getContentHeight() - helper.getPaddingTop() - helper.getPaddingBottom(),
@@ -440,7 +439,7 @@ public class FixLayoutHelper extends FixAreaLayoutHelper {
 
 
             // do measurement
-            helper.measureChild(view, widthSpec, heightSpec);
+            helper.measureChildWithMargins(view, widthSpec, heightSpec);
         }
 
         int left, top, right, bottom;
@@ -470,7 +469,7 @@ public class FixLayoutHelper extends FixAreaLayoutHelper {
                     : orientationHelper.getDecoratedMeasurementInOther(view));
         }
 
-        layoutChild(view, left, top, right, bottom, helper);
+        layoutChildWithMargin(view, left, top, right, bottom, helper);
     }
 
     private static class FixViewAppearAnimatorListener extends AnimatorListenerAdapter {

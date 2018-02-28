@@ -24,18 +24,18 @@
 
 package com.alibaba.android.vlayout.layout;
 
+import com.alibaba.android.vlayout.LayoutManagerHelper;
+import com.alibaba.android.vlayout.OrientationHelperEx;
+import com.alibaba.android.vlayout.VirtualLayoutManager;
+
 import android.animation.ObjectAnimator;
 import android.graphics.Rect;
 import android.support.annotation.Nullable;
-import android.support.v7.widget.OrientationHelper;
 import android.support.v7.widget.RecyclerView;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewConfiguration;
 import android.view.ViewGroup;
-
-import com.alibaba.android.vlayout.LayoutManagerHelper;
-import com.alibaba.android.vlayout.VirtualLayoutManager;
 
 import static com.alibaba.android.vlayout.VirtualLayoutManager.VERTICAL;
 import static com.alibaba.android.vlayout.layout.FixLayoutHelper.BOTTOM_LEFT;
@@ -44,7 +44,7 @@ import static com.alibaba.android.vlayout.layout.FixLayoutHelper.TOP_RIGHT;
 
 /**
  * LayoutHelper that will be located as fix position at first layout, but its position could be changed by dragingg and dropping
- *
+ * <p>
  * Created by villadora on 15/8/28.
  */
 public class FloatLayoutHelper extends FixAreaLayoutHelper {
@@ -53,9 +53,11 @@ public class FloatLayoutHelper extends FixAreaLayoutHelper {
 
     private int mTransitionX = 0;
     private int mTransitionY = 0;
+    private boolean dragEnable;
 
     public FloatLayoutHelper() {
 
+        this.dragEnable = true;
     }
 
     private int mZIndex = 1;
@@ -142,6 +144,7 @@ public class FloatLayoutHelper extends FixAreaLayoutHelper {
         }
 
         mFixView = view;
+        mFixView.setClickable(true);
 
         doMeasureAndLayout(view, helper);
 
@@ -170,6 +173,7 @@ public class FloatLayoutHelper extends FixAreaLayoutHelper {
         if (mFixView != null && helper.isViewHolderUpdated(mFixView)) {
             // remove view, not recycle
             helper.removeChildView(mFixView);
+            helper.recycleView(mFixView);
             mFixView.setOnTouchListener(null);
             mFixView = null;
         }
@@ -199,13 +203,17 @@ public class FloatLayoutHelper extends FixAreaLayoutHelper {
                 // TODO: nested scrollBy
                 if (mFixView.getParent() == null) {
                     helper.addFixedView(mFixView);
-                    mFixView.setOnTouchListener(touchDragListener);
+                    if (dragEnable) {
+                        mFixView.setOnTouchListener(touchDragListener);
+                    }
                     mFixView.setTranslationX(mTransitionX);
                     mFixView.setTranslationY(mTransitionY);
                 } else {
                     helper.showView(mFixView);
                     // helper.removeChildView(mFixView);
-                    mFixView.setOnTouchListener(touchDragListener);
+                    if (dragEnable) {
+                        mFixView.setOnTouchListener(touchDragListener);
+                    }
                     helper.addFixedView(mFixView);
                 }
             } else {
@@ -215,7 +223,9 @@ public class FloatLayoutHelper extends FixAreaLayoutHelper {
                 helper.addFixedView(mFixView);
                 mFixView.setTranslationX(mTransitionX);
                 mFixView.setTranslationY(mTransitionY);
-                mFixView.setOnTouchListener(touchDragListener);
+                if (dragEnable) {
+                    mFixView.setOnTouchListener(touchDragListener);
+                }
             }
         }
 
@@ -238,6 +248,7 @@ public class FloatLayoutHelper extends FixAreaLayoutHelper {
         if (mFixView != null) {
             mFixView.setOnTouchListener(null);
             helper.removeChildView(mFixView);
+            helper.recycleView(mFixView);
             mFixView = null;
         }
     }
@@ -264,7 +275,7 @@ public class FloatLayoutHelper extends FixAreaLayoutHelper {
                         helper.getContentHeight() - helper.getPaddingTop() - helper.getPaddingBottom(),
                         params.height, layoutInVertical);
             }
-            // do measurement
+            // do measurement, measure child without taking off margins, see https://github.com/alibaba/Tangram-Android/issues/81
             helper.measureChild(view, widthSpec, heightSpec);
         } else {
             int widthSpec;
@@ -272,8 +283,8 @@ public class FloatLayoutHelper extends FixAreaLayoutHelper {
                     helper.getContentHeight() - helper.getPaddingTop() - helper.getPaddingBottom(), params.height, layoutInVertical);
             if (!Float.isNaN(params.mAspectRatio) && params.mAspectRatio > 0) {
                 widthSpec = helper.getChildMeasureSpec(
-                    helper.getContentWidth() - helper.getPaddingLeft() - helper.getPaddingRight(),
-                     (int) (View.MeasureSpec.getSize(heightSpec) * params.mAspectRatio + 0.5f), !layoutInVertical);
+                        helper.getContentWidth() - helper.getPaddingLeft() - helper.getPaddingRight(),
+                        (int) (View.MeasureSpec.getSize(heightSpec) * params.mAspectRatio + 0.5f), !layoutInVertical);
             } else if (!Float.isNaN(mAspectRatio) && mAspectRatio > 0) {
                 widthSpec = helper.getChildMeasureSpec(
                         helper.getContentWidth() - helper.getPaddingLeft() - helper.getPaddingRight(),
@@ -283,12 +294,12 @@ public class FloatLayoutHelper extends FixAreaLayoutHelper {
                         helper.getContentWidth() - helper.getPaddingLeft() - helper.getPaddingRight(),
                         params.width, !layoutInVertical);
             }
-            // do measurement
+            // do measurement,  measure child without taking off margins, see https://github.com/alibaba/Tangram-Android/issues/81
             helper.measureChild(view, widthSpec, heightSpec);
         }
 
 
-        final OrientationHelper orientationHelper = helper.getMainOrientationHelper();
+        final OrientationHelperEx orientationHelper = helper.getMainOrientationHelper();
         int left, top, right, bottom;
 
         if (mAlignType == TOP_RIGHT) {
@@ -334,7 +345,7 @@ public class FloatLayoutHelper extends FixAreaLayoutHelper {
             top = bottom - (layoutInVertical ? orientationHelper.getDecoratedMeasurement(view) : orientationHelper.getDecoratedMeasurementInOther(view));
         }
 
-        layoutChild(view, left, top, right, bottom, helper);
+        layoutChildWithMargin(view, left, top, right, bottom, helper);
     }
 
 
@@ -406,7 +417,7 @@ public class FloatLayoutHelper extends FixAreaLayoutHelper {
                         int curTranslateX = translateX - v.getLeft() - leftMargin - mAdjuster.left;
                         v.setTranslationX(curTranslateX);
                         int curTranslateY = translateY - v.getTop() - topMargin/* - mAdjuster.top*/;
-                        if (curTranslateY + v.getHeight() + v.getTop() + bottomMargin/* + mAdjuster.bottom */> parentViewHeight) {
+                        if (curTranslateY + v.getHeight() + v.getTop() + bottomMargin/* + mAdjuster.bottom */ > parentViewHeight) {
                             curTranslateY = parentViewHeight - v.getHeight()
                                     - v.getTop() - bottomMargin/* - mAdjuster.bottom*/;
                         }
@@ -420,6 +431,7 @@ public class FloatLayoutHelper extends FixAreaLayoutHelper {
                 case MotionEvent.ACTION_CANCEL:
                     doPullOverAnimation(v);
                     (v.getParent()).requestDisallowInterceptTouchEvent(false);
+                    v.setPressed(false);
                     break;
             }
             return isDrag;
@@ -443,4 +455,11 @@ public class FloatLayoutHelper extends FixAreaLayoutHelper {
             animator.start();
         }
     };
+
+    public void setDragEnable(boolean dragEnable) {
+        this.dragEnable = dragEnable;
+        if (null != mFixView) {
+            mFixView.setOnTouchListener(dragEnable ? touchDragListener : null);
+        }
+    }
 }

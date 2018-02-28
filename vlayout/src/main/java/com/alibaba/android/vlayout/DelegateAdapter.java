@@ -36,6 +36,7 @@ import com.alibaba.android.vlayout.layout.SingleLayoutHelper;
 
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Iterator;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -63,6 +64,10 @@ public class DelegateAdapter extends VirtualLayoutAdapter<RecyclerView.ViewHolde
     private final List<Pair<AdapterDataObserver, Adapter>> mAdapters = new ArrayList<>();
 
     private int mTotal = 0;
+
+    private final SparseArray<Pair<AdapterDataObserver, Adapter>> mIndexAry = new SparseArray<>();
+
+    private long[] cantorReverse = new long[2];
 
     /**
      * Delegate Adapter merge multi sub adapters, default is thread-unsafe
@@ -110,30 +115,41 @@ public class DelegateAdapter extends VirtualLayoutAdapter<RecyclerView.ViewHolde
 
 
         // reverse Cantor Function
-        int w = (int) (Math.floor(Math.sqrt(8 * viewType + 1) - 1) / 2);
-        int t = (w * w + w) / 2;
+        Cantor.reverseCantor(viewType, cantorReverse);
 
-        int index = viewType - t;
-        int subItemType = w - index;
+        int index = (int)cantorReverse[1];
+        int subItemType = (int)cantorReverse[0];
 
-        int idx = findAdapterPositionByIndex(index);
-        if (idx < 0)
+        Adapter adapter = findAdapterByIndex(index);
+        if (adapter == null) {
             return null;
+        }
 
-        Pair<AdapterDataObserver, Adapter> p = mAdapters.get(idx);
-
-        return p.second.onCreateViewHolder(parent, subItemType);
+        return adapter.onCreateViewHolder(parent, subItemType);
     }
 
     @SuppressWarnings("unchecked")
     @Override
     public void onBindViewHolder(RecyclerView.ViewHolder holder, int position) {
         Pair<AdapterDataObserver, Adapter> pair = findAdapterByPosition(position);
-        if (pair == null)
+        if (pair == null) {
             return;
+        }
 
         pair.second.onBindViewHolder(holder, position - pair.first.mStartPosition);
         pair.second.onBindViewHolderWithOffset(holder, position - pair.first.mStartPosition, position);
+    }
+
+    @SuppressWarnings("unchecked")
+    @Override
+    public void onBindViewHolder(RecyclerView.ViewHolder holder, int position, List<Object> payloads) {
+        Pair<AdapterDataObserver, Adapter> pair = findAdapterByPosition(position);
+        if (pair == null) {
+            return;
+        }
+        pair.second.onBindViewHolder(holder, position - pair.first.mStartPosition, payloads);
+        pair.second.onBindViewHolderWithOffset(holder, position - pair.first.mStartPosition, position, payloads);
+
     }
 
     @Override
@@ -150,13 +166,16 @@ public class DelegateAdapter extends VirtualLayoutAdapter<RecyclerView.ViewHolde
     @Override
     public int getItemViewType(int position) {
         Pair<AdapterDataObserver, Adapter> p = findAdapterByPosition(position);
-        if (p == null)
+        if (p == null) {
             return RecyclerView.INVALID_TYPE;
+        }
 
         int subItemType = p.second.getItemViewType(position - p.first.mStartPosition);
 
-        if (subItemType < 0) // negative integer, invalid, just return
+        if (subItemType < 0) {
+            // negative integer, invalid, just return
             return subItemType;
+        }
 
         if (mHasConsistItemType) {
             mItemTypeAry.put(subItemType, p.second);
@@ -166,7 +185,7 @@ public class DelegateAdapter extends VirtualLayoutAdapter<RecyclerView.ViewHolde
 
         int index = p.first.mIndex;
 
-        return (int) getCantor(subItemType, index);
+        return (int) Cantor.getCantor(subItemType, index);
     }
 
 
@@ -174,19 +193,21 @@ public class DelegateAdapter extends VirtualLayoutAdapter<RecyclerView.ViewHolde
     public long getItemId(int position) {
         Pair<AdapterDataObserver, Adapter> p = findAdapterByPosition(position);
 
-        if (p == null)
+        if (p == null) {
             return NO_ID;
+        }
 
         long itemId = p.second.getItemId(position - p.first.mStartPosition);
 
-        if (itemId < 0)
+        if (itemId < 0) {
             return NO_ID;
+        }
 
         int index = p.first.mIndex;
         /*
          * Now we have a pairing function problem, we use cantor pairing function for itemId.
          */
-        return getCantor(index, itemId);
+        return Cantor.getCantor(index, itemId);
     }
 
     @Override
@@ -200,7 +221,7 @@ public class DelegateAdapter extends VirtualLayoutAdapter<RecyclerView.ViewHolde
         super.onViewRecycled(holder);
 
         int position = holder.getPosition();
-        if (position > 0) {
+        if (position >= 0) {
             Pair<AdapterDataObserver, Adapter> pair = findAdapterByPosition(position);
             if (pair != null) {
                 pair.second.onViewRecycled(holder);
@@ -214,7 +235,7 @@ public class DelegateAdapter extends VirtualLayoutAdapter<RecyclerView.ViewHolde
     public void onViewAttachedToWindow(RecyclerView.ViewHolder holder) {
         super.onViewAttachedToWindow(holder);
         int position = holder.getPosition();
-        if (position > 0) {
+        if (position >= 0) {
             Pair<AdapterDataObserver, Adapter> pair = findAdapterByPosition(position);
             if (pair != null) {
                 pair.second.onViewAttachedToWindow(holder);
@@ -227,7 +248,7 @@ public class DelegateAdapter extends VirtualLayoutAdapter<RecyclerView.ViewHolde
     public void onViewDetachedFromWindow(RecyclerView.ViewHolder holder) {
         super.onViewDetachedFromWindow(holder);
         int position = holder.getPosition();
-        if (position > 0) {
+        if (position >= 0) {
             Pair<AdapterDataObserver, Adapter> pair = findAdapterByPosition(position);
             if (pair != null) {
                 pair.second.onViewDetachedFromWindow(holder);
@@ -249,13 +270,16 @@ public class DelegateAdapter extends VirtualLayoutAdapter<RecyclerView.ViewHolde
     public void setAdapters(@Nullable List<Adapter> adapters) {
         clear();
 
-        if (adapters == null)
+        if (adapters == null) {
             adapters = Collections.emptyList();
+        }
 
         List<LayoutHelper> helpers = new LinkedList<>();
 
         boolean hasStableIds = true;
         mTotal = 0;
+
+        Pair<AdapterDataObserver, Adapter> pair;
         for (Adapter adapter : adapters) {
             // every adapter has an unique index id
             AdapterDataObserver observer = new AdapterDataObserver(mTotal, mIndexGen == null ? mIndex++ : mIndexGen.incrementAndGet());
@@ -266,7 +290,9 @@ public class DelegateAdapter extends VirtualLayoutAdapter<RecyclerView.ViewHolde
             helper.setItemCount(adapter.getItemCount());
             mTotal += helper.getItemCount();
             helpers.add(helper);
-            mAdapters.add(Pair.create(observer, adapter));
+            pair = Pair.create(observer, adapter);
+            mIndexAry.put(observer.mIndex, pair);
+            mAdapters.add(pair);
         }
 
         if (!hasObservers()) {
@@ -282,10 +308,9 @@ public class DelegateAdapter extends VirtualLayoutAdapter<RecyclerView.ViewHolde
      * @param adapters adapters
      */
     public void addAdapters(int position, @Nullable List<Adapter> adapters) {
-        if (adapters == null || adapters.size() == 0) return;
-
-        boolean hasStableIds = super.hasStableIds();
-
+        if (adapters == null || adapters.size() == 0) {
+            return;
+        }
         if (position < 0) {
             position = 0;
         }
@@ -294,24 +319,18 @@ public class DelegateAdapter extends VirtualLayoutAdapter<RecyclerView.ViewHolde
             position = mAdapters.size();
         }
 
-        List<LayoutHelper> helpers = new LinkedList<>(super.getLayoutHelpers());
-
-        for (Adapter adapter : adapters) {
-            // every adapter has an unique index id
-            AdapterDataObserver observer = new AdapterDataObserver(mTotal, mIndexGen == null ? mIndex++ : mIndexGen.incrementAndGet());
-            adapter.registerAdapterDataObserver(observer);
-            hasStableIds = hasStableIds && adapter.hasStableIds();
-            LayoutHelper helper = adapter.onCreateLayoutHelper();
-
-            helper.setItemCount(adapter.getItemCount());
-            mTotal += helper.getItemCount();
-
-            helpers.add(position, helper);
-            mAdapters.add(position, Pair.create(observer, adapter));
+        List<Adapter> newAdapter = new ArrayList<>();
+        Iterator<Pair<AdapterDataObserver, Adapter>> itr = mAdapters.iterator();
+        while (itr.hasNext()) {
+            Pair<AdapterDataObserver, Adapter> pair = itr.next();
+            Adapter theOrigin = pair.second;
+            newAdapter.add(theOrigin);
         }
-
-        super.setHasStableIds(hasStableIds);
-        super.setLayoutHelpers(helpers);
+        for (Adapter adapter : adapters) {
+            newAdapter.add(position, adapter);
+            position++;
+        }
+        setAdapters(newAdapter);
     }
 
     /**
@@ -331,9 +350,71 @@ public class DelegateAdapter extends VirtualLayoutAdapter<RecyclerView.ViewHolde
         addAdapters(Collections.singletonList(adapter));
     }
 
+    public void removeFirstAdapter() {
+        if (mAdapters != null && !mAdapters.isEmpty()) {
+            Adapter targetAdatper = mAdapters.get(0).second;
+            removeAdapter(targetAdatper);
+        }
+    }
 
-    protected void clear() {
+    public void removeLastAdapter() {
+        if (mAdapters != null && !mAdapters.isEmpty()) {
+            Adapter targetAdatper = mAdapters.get(mAdapters.size() - 1).second;
+            removeAdapter(targetAdatper);
+        }
+    }
+
+    public void removeAdapter(int adapterIndex) {
+        if (adapterIndex >= 0 && adapterIndex < mAdapters.size()) {
+            Adapter targetAdatper = mAdapters.get(adapterIndex).second;
+            removeAdapter(targetAdatper);
+        }
+    }
+
+    public void removeAdapter(@Nullable Adapter targetAdapter) {
+        if (targetAdapter == null) {
+            return;
+        }
+        removeAdapters(Collections.singletonList(targetAdapter));
+    }
+
+    public void removeAdapters(@Nullable List<Adapter> targetAdapters) {
+        if (targetAdapters == null || targetAdapters.isEmpty()) {
+            return;
+        }
+        List<LayoutHelper> helpers = new LinkedList<>(super.getLayoutHelpers());
+        for (int i = 0, size = targetAdapters.size(); i < size; i++) {
+            Adapter one = targetAdapters.get(i);
+            Iterator<Pair<AdapterDataObserver, Adapter>> itr = mAdapters.iterator();
+            while (itr.hasNext()) {
+                Pair<AdapterDataObserver, Adapter> pair = itr.next();
+                Adapter theOther = pair.second;
+                if (theOther.equals(one)) {
+                    theOther.unregisterAdapterDataObserver(pair.first);
+                    final int position = findAdapterPositionByIndex(pair.first.mIndex);
+                    if (position >= 0 && position < helpers.size()) {
+                        helpers.remove(position);
+                    }
+                    itr.remove();
+                    break;
+                }
+            }
+        }
+
+        List<Adapter> newAdapter = new ArrayList<>();
+        Iterator<Pair<AdapterDataObserver, Adapter>> itr = mAdapters.iterator();
+        while (itr.hasNext()) {
+            newAdapter.add(itr.next().second);
+        }
+        setAdapters(newAdapter);
+    }
+
+    public void clear() {
         mTotal = 0;
+        mIndex = 0;
+        if (mIndexGen != null) {
+            mIndexGen.set(0);
+        }
         mLayoutManager.setLayoutHelpers(null);
 
         for (Pair<AdapterDataObserver, Adapter> p : mAdapters) {
@@ -343,11 +424,28 @@ public class DelegateAdapter extends VirtualLayoutAdapter<RecyclerView.ViewHolde
 
         mItemTypeAry.clear();
         mAdapters.clear();
+        mIndexAry.clear();
     }
 
+    public int getAdaptersCount() {
+        return mAdapters == null ? 0 : mAdapters.size();
+    }
+
+    /**
+     * @param absoultePosition
+     * @return the relative position in sub adapter by the absoulte position in DelegaterAdapter. Return -1 if no sub adapter founded.
+     */
+    public int findOffsetPosition(int absoultePosition) {
+        Pair<AdapterDataObserver, Adapter> p = findAdapterByPosition(absoultePosition);
+        if (p == null) {
+            return -1;
+        }
+        int subAdapterPosition = absoultePosition - p.first.mStartPosition;
+        return subAdapterPosition;
+    }
 
     @Nullable
-    protected Pair<AdapterDataObserver, Adapter> findAdapterByPosition(int position) {
+    public Pair<AdapterDataObserver, Adapter> findAdapterByPosition(int position) {
         final int count = mAdapters.size();
         if (count == 0) {
             return null;
@@ -366,8 +464,9 @@ public class DelegateAdapter extends VirtualLayoutAdapter<RecyclerView.ViewHolde
                 e = m - 1;
             } else if (endPosition < position) {
                 s = m + 1;
-            } else if (rs.first.mStartPosition <= position && endPosition >= position)
+            } else if (rs.first.mStartPosition <= position && endPosition >= position) {
                 break;
+            }
 
             rs = null;
         }
@@ -376,32 +475,17 @@ public class DelegateAdapter extends VirtualLayoutAdapter<RecyclerView.ViewHolde
     }
 
 
-    protected int findAdapterPositionByIndex(int index) {
-        final int count = mAdapters.size();
-        if (count == 0) {
-            return -1;
-        }
-
-        int s = 0, e = count - 1, m = -1;
-        Pair<AdapterDataObserver, Adapter> rs = null;
-
-        // binary search range
-        while (s <= e) {
-            m = (s + e) / 2;
-            rs = mAdapters.get(m);
-            if (rs.first.mIndex > index) {
-                e = m - 1;
-            } else if (rs.first.mIndex < index) {
-                s = m + 1;
-            } else if (rs.first.mIndex == index)
-                break;
-            rs = null;
-        }
-
-        return rs == null ? -1 : m;
+    public int findAdapterPositionByIndex(int index) {
+        Pair<AdapterDataObserver, Adapter> rs = mIndexAry.get(index);
+        return rs == null ? -1 : mAdapters.indexOf(rs);
     }
 
-    private class AdapterDataObserver extends RecyclerView.AdapterDataObserver {
+    public Adapter findAdapterByIndex(int index) {
+        Pair<AdapterDataObserver, Adapter> rs = mIndexAry.get(index);
+        return rs.second;
+    }
+
+    protected class AdapterDataObserver extends RecyclerView.AdapterDataObserver {
         int mStartPosition;
 
         int mIndex = -1;
@@ -411,16 +495,31 @@ public class DelegateAdapter extends VirtualLayoutAdapter<RecyclerView.ViewHolde
             this.mIndex = index;
         }
 
-        @Override
-        public void onChanged() {
-            if (mIndex < 0)
-                return;
+        public void updateStartPositionAndIndex(int startPosition, int index) {
+            this.mStartPosition = startPosition;
+            this.mIndex = index;
+        }
+
+        public int getStartPosition() {
+            return mStartPosition;
+        }
+
+        public int getIndex() {
+            return mIndex;
+        }
+
+        private boolean updateLayoutHelper() {
+            if (mIndex < 0) {
+                return false;
+            }
 
             final int idx = findAdapterPositionByIndex(mIndex);
-            if (idx < 0) return;
+            if (idx < 0) {
+                return false;
+            }
 
             Pair<AdapterDataObserver, Adapter> p = mAdapters.get(idx);
-            List<LayoutHelper> helpers = getLayoutHelpers();
+            List<LayoutHelper> helpers = new LinkedList<>(getLayoutHelpers());
             LayoutHelper helper = helpers.get(idx);
 
             if (helper.getItemCount() != p.second.getItemCount()) {
@@ -439,28 +538,55 @@ public class DelegateAdapter extends VirtualLayoutAdapter<RecyclerView.ViewHolde
                 // set helpers to refresh range
                 DelegateAdapter.super.setLayoutHelpers(helpers);
             }
+            return true;
+        }
 
+        @Override
+        public void onChanged() {
+            if (!updateLayoutHelper()) {
+                return;
+            }
             notifyDataSetChanged();
         }
 
         @Override
         public void onItemRangeRemoved(int positionStart, int itemCount) {
-            onChanged();
+            if (!updateLayoutHelper()) {
+                return;
+            }
+            notifyItemRangeRemoved(mStartPosition + positionStart, itemCount);
         }
 
         @Override
         public void onItemRangeInserted(int positionStart, int itemCount) {
-            onChanged();
+            if (!updateLayoutHelper()) {
+                return;
+            }
+            notifyItemRangeInserted(mStartPosition + positionStart, itemCount);
         }
 
         @Override
         public void onItemRangeMoved(int fromPosition, int toPosition, int itemCount) {
-            onChanged();
+            if (!updateLayoutHelper()) {
+                return;
+            }
+            notifyItemMoved(mStartPosition + fromPosition, mStartPosition + toPosition);
         }
 
         @Override
         public void onItemRangeChanged(int positionStart, int itemCount) {
-            onChanged();
+            if (!updateLayoutHelper()) {
+                return;
+            }
+            notifyItemRangeChanged(mStartPosition + positionStart, itemCount);
+        }
+
+        @Override
+        public void onItemRangeChanged(int positionStart, int itemCount, Object payload) {
+            if (!updateLayoutHelper()) {
+                return;
+            }
+            notifyItemRangeChanged(mStartPosition + positionStart, itemCount, payload);
         }
     }
 
@@ -536,11 +662,10 @@ public class DelegateAdapter extends VirtualLayoutAdapter<RecyclerView.ViewHolde
         protected void onBindViewHolderWithOffset(VH holder, int position, int offsetTotal) {
 
         }
-    }
 
-
-    private static long getCantor(long k1, long k2) {
-        return (k1 + k2) * (k1 + k2 + 1) / 2 + k2;
+        protected void onBindViewHolderWithOffset(VH holder, int position, int offsetTotal, List<Object> payloads) {
+            onBindViewHolderWithOffset(holder, position, offsetTotal);
+        }
     }
 
 }

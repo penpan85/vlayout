@@ -24,6 +24,50 @@
 
 apply plugin: 'com.android.library'
 
+buildscript {
+    repositories {
+        maven { url 'https://oss.sonatype.org/content/repositories/snapshots/' }
+        maven { url "http://oss.jfrog.org/oss-snapshot-local/" }
+        mavenCentral()
+        jcenter()
+    }
+
+    dependencies {
+        classpath 'com.android.tools.build:gradle:2.3.0'
+    }
+}
+
+repositories {
+    maven { url 'https://oss.sonatype.org/content/repositories/snapshots/' }
+    maven { url "http://oss.jfrog.org/oss-snapshot-local/" }
+    jcenter()
+    mavenLocal()
+}
+
+
+ext {
+    bintrayRepo = 'Tangram'
+    bintrayName = 'vlayout'
+
+    publishedGroupId = project.hasProperty('GROUP') ? GROUP : ''
+    libraryName = project.hasProperty('ARTIFACT') ? ARTIFACT : ''
+    artifact = project.hasProperty('ARTIFACT') ? ARTIFACT : ''
+
+    libraryDescription = 'Project vlayout is a powerfull LayoutManager extension for RecyclerView, it provides a group of layouts for RecyclerView. Make it able to handle a complicate situation when grid, list and other layouts in the same recyclerview.'
+
+    siteUrl = 'https://github.com/alibaba/vlayout'
+    gitUrl = 'https://github.com/alibaba/vlayout.git'
+
+    libraryVersion = project.hasProperty('VERSION_NAME') ? VERSION_NAME : ''
+
+    developerId = 'longerian'
+    developerName = 'longerian'
+    developerEmail = 'xlhongultimate@gmail.com'
+
+    licenseName = 'MIT'
+    licenseUrl = 'https://opensource.org/licenses/MIT'
+    allLicenses = ["MIT"]
+}
 
 def VERSION = System.properties['version'] ?: '10'
 def VERSION_NAME = System.properties['versionName'] ?: '0.1.0'
@@ -48,17 +92,31 @@ android {
         release {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
-        }    }
+        }
+    }
+
+    lintOptions {
+        abortOnError false
+    }
+
 }
 
 dependencies {
     compile fileTree(dir: 'libs', include: ['*.jar'])
     // compile project(':extension')
-    compile 'com.android.support:recyclerview-v7:23.1.1@aar'
-    compile('com.android.support:support-v4:23.1.1@aar') {
-        exclude group: 'com.android.support', module: 'support-annotations'
+    if (project.hasProperty('useNewSupportLibrary')) {
+        compile 'com.android.support:recyclerview-v7:25.2.0@aar'
+        compile('com.android.support:support-v4:25.2.0@aar')
+        compile 'com.android.support:support-annotations:25.2.0'
+        compile 'com.android.support:support-compat:25.2.0'
+        compile 'com.android.support:support-core-ui:25.2.0'
+    } else {
+        compile 'com.android.support:recyclerview-v7:23.1.1@aar'
+        compile('com.android.support:support-v4:23.1.1@aar') {
+            exclude group: 'com.android.support', module: 'support-annotations'
+        }
+        compile 'com.android.support:support-annotations:23.1.1'
     }
-    compile 'com.android.support:support-annotations:23.1.1'
 
     androidTestCompile "org.robolectric:robolectric:3.0"
 }
@@ -67,4 +125,14 @@ dependencies {
 File deployConfig = rootProject.file('deploy.gradle')
 if (deployConfig.exists()) {
     apply from: rootProject.file('deploy.gradle')
+}
+
+deployConfig = rootProject.file('jcenterInstall.gradle')
+if (deployConfig.exists()) {
+    apply from: rootProject.file('jcenterInstall.gradle')
+}
+
+deployConfig = rootProject.file('jcenterDeploy.gradle')
+if (deployConfig.exists()) {
+    apply from: rootProject.file('jcenterDeploy.gradle')
 }

@@ -41,6 +41,8 @@ import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.util.List;
 
+import com.alibaba.android.vlayout.VirtualLayoutManager.LayoutParams;
+
 /**
  * This class is used to expose layoutChunk method, should not be used in anywhere else
  * It's only a valid class technically and with no features/functions in it
@@ -87,7 +89,7 @@ class ExposeLinearLayoutManagerEx extends LinearLayoutManager {
      * Based on {@link #mOrientation}, an implementation is lazily created in
      * {@link #ensureLayoutStateExpose} method.
      */
-    private OrientationHelper mOrientationHelper;
+    private OrientationHelperEx mOrientationHelper;
 
     /**
      * We need to track this so that we can ignore current position when it changes.
@@ -127,6 +129,7 @@ class ExposeLinearLayoutManagerEx extends LinearLayoutManager {
 
     private final Method mEnsureLayoutStateMethod;
 
+    private int recycleOffset;
 
     /**
      * Creates a vertical LinearLayoutManager
@@ -159,6 +162,21 @@ class ExposeLinearLayoutManagerEx extends LinearLayoutManager {
             e.printStackTrace();
             throw new RuntimeException(e);
         }
+        try {
+            // FIXME in the future
+            Method setItemPrefetchEnabledMethod = RecyclerView.LayoutManager.class
+                    .getDeclaredMethod("setItemPrefetchEnabled", boolean.class);
+            if (setItemPrefetchEnabledMethod != null) {
+                setItemPrefetchEnabledMethod.invoke(this, false);
+            }
+        } catch (NoSuchMethodException e) {
+            /* this method is added in 25.1.0, official release still has bug, see
+             * https://code.google.com/p/android/issues/detail?can=2&start=0&num=100&q=&colspec=ID%20Status%20Priority%20Owner%20Summary%20Stars%20Reporter%20Opened&groupby=&sort=&id=230295
+             **/
+        } catch (InvocationTargetException e) {
+        } catch (IllegalAccessException e) {
+        }
+//        setItemPrefetchEnabled(false);
     }
 
 
@@ -210,6 +228,10 @@ class ExposeLinearLayoutManagerEx extends LinearLayoutManager {
     public void setOrientation(int orientation) {
         super.setOrientation(orientation);
         mOrientationHelper = null;
+    }
+
+    public void setRecycleOffset(int recycleOffset) {
+        this.recycleOffset = recycleOffset;
     }
 
     /**
@@ -786,7 +808,7 @@ class ExposeLinearLayoutManagerEx extends LinearLayoutManager {
         }
 
         if (mOrientationHelper == null) {
-            mOrientationHelper = OrientationHelper.createOrientationHelper(this, getOrientation());
+            mOrientationHelper = OrientationHelperEx.createOrientationHelper(this, getOrientation());
         }
 
         try {
@@ -898,6 +920,20 @@ class ExposeLinearLayoutManagerEx extends LinearLayoutManager {
         return 0;
     }
 
+    /**
+     * adjust align offset when fill view during scrolling or get margins when layout from anchor
+     *
+     * @param position
+     * @param isLayoutEnd
+     * @return
+     */
+    protected int computeAlignOffset(int position, boolean isLayoutEnd, boolean useAnchor) {
+        return 0;
+    }
+
+    public boolean isEnableMarginOverLap() {
+        return false;
+    }
 
     /**
      * {@inheritDoc}
@@ -1017,7 +1053,7 @@ class ExposeLinearLayoutManagerEx extends LinearLayoutManager {
         if (mShouldReverseLayoutExpose) {
             for (int i = childCount - 1; i >= 0; i--) {
                 View child = getChildAt(i);
-                if (mOrientationHelper.getDecoratedEnd(child) > limit) {// stop here
+                if (mOrientationHelper.getDecoratedEnd(child) + recycleOffset > limit) {// stop here
                     recycleChildren(recycler, childCount - 1, i);
                     return;
                 }
@@ -1025,7 +1061,7 @@ class ExposeLinearLayoutManagerEx extends LinearLayoutManager {
         } else {
             for (int i = 0; i < childCount; i++) {
                 View child = getChildAt(i);
-                if (mOrientationHelper.getDecoratedEnd(child) > limit) {// stop here
+                if (mOrientationHelper.getDecoratedEnd(child) + recycleOffset > limit) {// stop here
                     recycleChildren(recycler, 0, i);
                     return;
                 }
@@ -1055,7 +1091,7 @@ class ExposeLinearLayoutManagerEx extends LinearLayoutManager {
         if (mShouldReverseLayoutExpose) {
             for (int i = 0; i < childCount; i++) {
                 View child = getChildAt(i);
-                if (mOrientationHelper.getDecoratedStart(child) < limit) {// stop here
+                if (mOrientationHelper.getDecoratedStart(child) - recycleOffset < limit) {// stop here
                     recycleChildren(recycler, 0, i);
                     return;
                 }
@@ -1063,7 +1099,7 @@ class ExposeLinearLayoutManagerEx extends LinearLayoutManager {
         } else {
             for (int i = childCount - 1; i >= 0; i--) {
                 View child = getChildAt(i);
-                if (mOrientationHelper.getDecoratedStart(child) < limit) {// stop here
+                if (mOrientationHelper.getDecoratedStart(child) - recycleOffset < limit) {// stop here
                     recycleChildren(recycler, childCount - 1, i);
                     return;
                 }
@@ -1119,7 +1155,8 @@ class ExposeLinearLayoutManagerEx extends LinearLayoutManager {
             }
             recycleByLayoutStateExpose(recycler, layoutState);
         }
-        int remainingSpace = layoutState.mAvailable + layoutState.mExtra;
+        int remainingSpace = layoutState.mAvailable + layoutState.mExtra + (
+            layoutState.mLayoutDirection == LayoutState.LAYOUT_START ? 0 : recycleOffset); //FIXME  opt here to fix bg and shake
         while (remainingSpace > 0 && layoutState.hasMore(state)) {
             layoutChunkResultCache.resetInternal();
             layoutChunk(recycler, state, layoutState, layoutChunkResultCache);
@@ -1702,11 +1739,22 @@ class ExposeLinearLayoutManagerEx extends LinearLayoutManager {
             if (mLayoutFromEnd) {
                 mCoordinate = mOrientationHelper.getDecoratedEnd(child) + computeAlignOffset(child, mLayoutFromEnd, true) +
                         mOrientationHelper.getTotalSpaceChange();
+                if (DEBUG) {
+                    Log.d(TAG, "1 mLayoutFromEnd " + mLayoutFromEnd + " mOrientationHelper.getDecoratedEnd(child) "
+                        + mOrientationHelper.getDecoratedEnd(child) + " computeAlignOffset(child, mLayoutFromEnd, true) " + computeAlignOffset(child, mLayoutFromEnd, true));
+                }
             } else {
                 mCoordinate = mOrientationHelper.getDecoratedStart(child) + computeAlignOffset(child, mLayoutFromEnd, true);
+                if (DEBUG) {
+                    Log.d(TAG, "2 mLayoutFromEnd " + mLayoutFromEnd + " mOrientationHelper.getDecoratedStart(child) "
+                        + mOrientationHelper.getDecoratedStart(child) + " computeAlignOffset(child, mLayoutFromEnd, true) " + computeAlignOffset(child, mLayoutFromEnd, true));
+                }
             }
 
             mPosition = getPosition(child);
+            if (DEBUG) {
+                Log.d(TAG, "position " + mPosition + " mCoordinate " + mCoordinate);
+            }
         }
     }
 
@@ -1822,6 +1870,9 @@ class ExposeLinearLayoutManagerEx extends LinearLayoutManager {
 
         private Method mFindHiddenNonRemovedViewMethod;
 
+        /** start from 25.2.0, maybe earlier, this method reduce parameters from two to one */
+        private Method mFindHiddenNonRemovedViewMethod25;
+
         private Method mIsHideMethod;
 
         private Field mHiddenViewField;
@@ -1847,8 +1898,13 @@ class ExposeLinearLayoutManagerEx extends LinearLayoutManager {
                     Class<?> helperClz = mInnerChildHelper.getClass();
                     mHideMethod = helperClz.getDeclaredMethod("hide", View.class);
                     mHideMethod.setAccessible(true);
-                    mFindHiddenNonRemovedViewMethod = helperClz.getDeclaredMethod("findHiddenNonRemovedView", int.class, int.class);
-                    mFindHiddenNonRemovedViewMethod.setAccessible(true);
+                    try {
+                        mFindHiddenNonRemovedViewMethod = helperClz.getDeclaredMethod("findHiddenNonRemovedView", int.class, int.class);
+                        mFindHiddenNonRemovedViewMethod.setAccessible(true);
+                    } catch (NoSuchMethodException nsme) {
+                        mFindHiddenNonRemovedViewMethod25 = helperClz.getDeclaredMethod("findHiddenNonRemovedView", int.class);
+                        mFindHiddenNonRemovedViewMethod25.setAccessible(true);
+                    }
                     mIsHideMethod = helperClz.getDeclaredMethod("isHidden", View.class);
                     mIsHideMethod.setAccessible(true);
 
@@ -1883,8 +1939,10 @@ class ExposeLinearLayoutManagerEx extends LinearLayoutManager {
         void hide(View view) {
             try {
                 ensureChildHelper();
-                args[0] = view;
-                mHideMethod.invoke(mInnerChildHelper, args);
+                if (mInnerHiddenView.indexOf(view) < 0) {
+                    args[0] = view;
+                    mHideMethod.invoke(mInnerChildHelper, args);
+                }
             } catch (Exception e) {
                 e.printStackTrace();
             }
@@ -1906,7 +1964,11 @@ class ExposeLinearLayoutManagerEx extends LinearLayoutManager {
         View findHiddenNonRemovedView(int position, int type) {
             try {
                 ensureChildHelper();
-                return (View) mFindHiddenNonRemovedViewMethod.invoke(mInnerChildHelper, position, RecyclerView.INVALID_TYPE);
+                if (mFindHiddenNonRemovedViewMethod != null) {
+                    return (View) mFindHiddenNonRemovedViewMethod.invoke(mInnerChildHelper, position, RecyclerView.INVALID_TYPE);
+                } else if (mFindHiddenNonRemovedViewMethod25 != null) {
+                    return (View) mFindHiddenNonRemovedViewMethod25.invoke(mInnerChildHelper, position);
+                }
             } catch (IllegalAccessException e) {
                 e.printStackTrace();
             } catch (InvocationTargetException e) {
